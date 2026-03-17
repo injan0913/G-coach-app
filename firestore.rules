@@ -9,22 +9,29 @@ service cloud.firestore {
     // Collection: users
     // Fields:
     //   - uid: string (required)
-    //   - displayName: string (optional)
-    //   - email: string (optional)
-    //   - garminConnected: bool (optional)
-    //   - garminToken: string (optional)
-    //   - garminUserId: string (optional)
-    //   - lastSync: string (optional, ISO8601)
-    //   - summary30d: map (optional)
+    //   - displayName: string
+    //   - email: string
+    //   - garminConnected: bool
+    //   - garminToken: string
+    //   - garminUserId: string
+    //   - lastSync: string (ISO8601)
+    //   - summary30d: map
+    //   - coachInsights: string
     //
     // Collection: users/{userId}/activities
     // Fields:
-    //   - uid: string (required)
-    //   - activityId: string (required)
-    //   - type: string (required)
+    //   - uid: string
+    //   - activityId: string
+    //   - activityName: string
+    //   - type: string
+    //   - startTime: string
     //   - distance: number
     //   - duration: number
-    //   ...
+    //   - pace: number
+    //   - trainingEffect: string
+    //   - averageHeartRate: number
+    //   - eph: number
+    //   - vo2Max: number
     //
     // ===============================================================
 
@@ -38,11 +45,27 @@ service cloud.firestore {
     }
 
     function isValidUser(data) {
-      return data.uid is string && 
+      let allowedFields = [
+        'uid', 'displayName', 'email', 'garminConnected', 
+        'garminToken', 'garminUserId', 'lastSync', 'summary30d', 'coachInsights'
+      ];
+      return data.keys().hasOnly(allowedFields) &&
+             data.uid is string && 
              (!('displayName' in data) || data.displayName is string) &&
              (!('email' in data) || data.email is string) &&
-             (!('garminToken' in data) || (data.garminToken is string && data.garminToken.size() < 2000)) &&
-             (!('garminConnected' in data) || data.garminConnected is bool);
+             (!('garminToken' in data) || (data.garminToken is string && data.garminToken.size() < 5000)) &&
+             (!('garminConnected' in data) || data.garminConnected is bool) &&
+             (!('lastSync' in data) || data.lastSync is string) &&
+             (!('summary30d' in data) || data.summary30d is map) &&
+             (!('coachInsights' in data) || data.coachInsights is string);
+    }
+
+    function isValidActivity(data) {
+      return data.uid is string &&
+             data.activityId is string &&
+             data.startTime is string &&
+             data.distance is number &&
+             data.duration is number;
     }
 
     // User Profile Rules
@@ -54,7 +77,7 @@ service cloud.firestore {
     // Activities Rules
     match /users/{userId}/activities/{activityId} {
       allow read: if isOwner(userId);
-      allow create, update: if isOwner(userId) && request.resource.data.uid == userId;
+      allow create, update: if isOwner(userId) && isValidActivity(request.resource.data) && request.resource.data.uid == userId;
       allow delete: if isOwner(userId);
     }
 

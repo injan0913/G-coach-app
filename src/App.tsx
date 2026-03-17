@@ -126,7 +126,7 @@ export default function App() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatHistory]);
 
-  const handleFirestoreError = (error: any, operation: string, path: string) => {
+  const handleFirestoreError = (error: any, operation: any, path: string | null) => {
     const errInfo = {
       error: error.message || String(error),
       operationType: operation,
@@ -134,11 +134,17 @@ export default function App() {
       authInfo: {
         userId: auth.currentUser?.uid,
         email: auth.currentUser?.email,
-        emailVerified: auth.currentUser?.emailVerified
+        emailVerified: auth.currentUser?.emailVerified,
+        isAnonymous: auth.currentUser?.isAnonymous,
+        providerInfo: auth.currentUser?.providerData.map(p => ({
+          providerId: p.providerId,
+          displayName: p.displayName,
+          email: p.email
+        })) || []
       }
     };
-    console.error('Firestore Error:', JSON.stringify(errInfo));
-    throw new Error(JSON.stringify(errInfo));
+    console.error('Firestore Error Details:', JSON.stringify(errInfo, null, 2));
+    throw error;
   };
 
   const fetchProfile = async (uid: string) => {
@@ -299,7 +305,11 @@ export default function App() {
         syncedActivities.push(activityData);
       }
       
-      await batch.commit();
+      try {
+        await batch.commit();
+      } catch (err) {
+        handleFirestoreError(err, "write", `users/${user.uid}/activities`);
+      }
 
       // Process Health Metrics
       let latestHRV = 0;
@@ -323,7 +333,11 @@ export default function App() {
           const ref = doc(db, "users", user.uid, "health_metrics", date);
           healthBatch.set(ref, metric, { merge: true });
         });
-        await healthBatch.commit();
+        try {
+          await healthBatch.commit();
+        } catch (err) {
+          handleFirestoreError(err, "write", `users/${user.uid}/health_metrics`);
+        }
       }
 
       const thirtyDaysAgo = new Date();
@@ -357,7 +371,11 @@ export default function App() {
         summary30d: { ...profile?.summary30d, ...summary }
       };
       
-      await setDoc(doc(db, "users", user.uid), updatedProfile, { merge: true });
+      try {
+        await setDoc(doc(db, "users", user.uid), updatedProfile, { merge: true });
+      } catch (err) {
+        handleFirestoreError(err, "update", `users/${user.uid}`);
+      }
       setProfile(updatedProfile as UserProfile);
       
       setChatHistory(prev => [...prev, { role: "model", text: "Success! I've fetched your activities from the last 30 days from Garmin using your token. Your dashboard is now updated." }]);
