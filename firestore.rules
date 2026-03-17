@@ -2,6 +2,32 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Fields:
+    //   - uid: string (required)
+    //   - displayName: string (optional)
+    //   - email: string (optional)
+    //   - garminConnected: bool (optional)
+    //   - garminToken: string (optional)
+    //   - garminUserId: string (optional)
+    //   - lastSync: string (optional, ISO8601)
+    //   - summary30d: map (optional)
+    //
+    // Collection: users/{userId}/activities
+    // Fields:
+    //   - uid: string (required)
+    //   - activityId: string (required)
+    //   - type: string (required)
+    //   - distance: number
+    //   - duration: number
+    //   ...
+    //
+    // ===============================================================
+
     // Helper Functions
     function isAuthenticated() {
       return request.auth != null;
@@ -11,27 +37,31 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function isValidUser(data) {
+      return data.uid is string && 
+             (!('displayName' in data) || data.displayName is string) &&
+             (!('email' in data) || data.email is string) &&
+             (!('garminToken' in data) || (data.garminToken is string && data.garminToken.size() < 2000)) &&
+             (!('garminConnected' in data) || data.garminConnected is bool);
+    }
+
     // User Profile Rules
     match /users/{userId} {
       allow read: if isOwner(userId);
-      allow create, update: if isOwner(userId) && 
-        request.resource.data.keys().hasAll(['uid']) &&
-        request.resource.data.uid == userId;
+      allow create, update: if isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.uid == userId;
     }
 
     // Activities Rules
     match /users/{userId}/activities/{activityId} {
       allow read: if isOwner(userId);
-      allow create, update: if isOwner(userId) && 
-        request.resource.data.uid == userId;
+      allow create, update: if isOwner(userId) && request.resource.data.uid == userId;
       allow delete: if isOwner(userId);
     }
 
     // Health Metrics Rules
     match /users/{userId}/health_metrics/{date} {
       allow read: if isOwner(userId);
-      allow create, update: if isOwner(userId) && 
-        request.resource.data.uid == userId;
+      allow create, update: if isOwner(userId) && request.resource.data.uid == userId;
     }
   }
 }

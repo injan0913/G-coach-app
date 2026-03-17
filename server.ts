@@ -5,8 +5,15 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
 import axios from "axios";
+import https from "https";
 
 dotenv.config();
+
+// Create an https agent that ignores SSL certificate errors
+// This is often needed in environments with strict network proxies or missing CA certs
+const httpsAgent = new https.Agent({
+  rejectUnauthorized: false,
+});
 
 async function startServer() {
   const app = express();
@@ -51,7 +58,8 @@ async function startServer() {
         client_secret: process.env.GARMIN_CLIENT_SECRET!,
         redirect_uri: `${process.env.APP_URL}/api/auth/garmin/callback`,
       }).toString(), {
-        headers: { "Content-Type": "application/x-www-form-urlencoded" }
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        httpsAgent
       });
 
       const { access_token, refresh_token } = tokenResponse.data;
@@ -92,7 +100,8 @@ async function startServer() {
       // Fetch activities from Garmin Connect API
       const response = await axios.get("https://connect.garmin.com/modern/proxy/activitylist-service/activities/search/activities", {
         headers: { Authorization: `Bearer ${accessToken}` },
-        params: { limit: 100 }
+        params: { limit: 100 },
+        httpsAgent
       });
       
       res.json(response.data);
@@ -108,29 +117,43 @@ async function startServer() {
     
     const headers = { 
       'Authorization': token.startsWith('Bearer ') ? token : `Bearer ${token}`,
-      'Cookie': token.includes('=') ? token : ''
+      'Cookie': token.includes('=') ? token : '',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/json, text/plain, */*',
+      'Referer': 'https://connect.garmin.com/modern/activities'
     };
 
     try {
+      console.log(`Attempting manual sync for UID: ${uid}`);
       // 1. Fetch Activities
       const activitiesRes = await axios.get("https://connect.garmin.com/modern/proxy/activitylist-service/activities/search/activities", {
         headers,
-        params: { limit: 50 }
+        params: { limit: 50 },
+        httpsAgent
       });
 
       // 2. Fetch Health Metrics (HRV, RHR, Sleep)
-      // Note: These endpoints might vary based on the type of token/session
       let healthData = { hrv: [], rhr: [], sleep: [] };
       try {
         const today = new Date().toISOString().split('T')[0];
-        const hrvRes = await axios.get(`https://connect.garmin.com/modern/proxy/hrv-service/hrv/${today}`, { headers });
+        const hrvRes = await axios.get(`https://connect.garmin.com/modern/proxy/hrv-service/hrv/${today}`, { 
+          headers,
+          httpsAgent
+        });
         healthData.hrv = hrvRes.data?.hrvSummaries || [];
-      } catch (e) { console.log("HRV fetch failed, skipping..."); }
+      } catch (e: any) { 
+        console.log("HRV fetch failed:", e.message); 
+      }
 
       try {
-        const rhrRes = await axios.get("https://connect.garmin.com/modern/proxy/userstats-service/statistics/restingHeartRate", { headers });
+        const rhrRes = await axios.get("https://connect.garmin.com/modern/proxy/userstats-service/statistics/restingHeartRate", { 
+          headers,
+          httpsAgent
+        });
         healthData.rhr = rhrRes.data || [];
-      } catch (e) { console.log("RHR fetch failed, skipping..."); }
+      } catch (e: any) { 
+        console.log("RHR fetch failed:", e.message); 
+      }
       
       res.json({ 
         success: true, 
@@ -139,10 +162,19 @@ async function startServer() {
         message: "Real data fetched from Garmin Connect."
       });
     } catch (error: any) {
-      console.error("Manual Sync Error:", error.response?.data || error.message);
-      res.status(500).json({ 
-        error: "Failed to fetch data. Please ensure your Garmin session token is valid.",
-        details: error.response?.data
+      const statusCode = error.response?.status || 500;
+      const errorData = error.response?.data;
+      console.error("Manual Sync Error:", {
+        status: statusCode,
+        message: error.message,
+        data: errorData
+      });
+      
+      res.status(statusCode).json({ 
+        error: "Failed to fetch data from Garmin.",
+        message: error.message,
+        details: errorData,
+        hint: "Please ensure your Garmin session token/cookie is valid and not expired. You may need to refresh your login on connect.garmin.com."
       });
     }
   });

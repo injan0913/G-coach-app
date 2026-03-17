@@ -9,6 +9,7 @@
         "displayName": { "type": "string" },
         "email": { "type": "string" },
         "garminConnected": { "type": "boolean" },
+        "garminToken": { "type": "string", "description": "Stored Garmin session token" },
         "garminUserId": { "type": "string" },
         "lastSync": { "type": "string", "format": "date-time" },
         "summary30d": {
