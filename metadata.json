@@ -1,0 +1,5 @@
+{
+  "name": "G-Coach: Gemini Running AI",
+  "description": "An AI-powered running coach that integrates with your Garmin data to provide personalized training advice, race predictions, and performance analysis.",
+  "requestFramePermissions": []
+}

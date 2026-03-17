@@ -1,0 +1,85 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Stores user preferences and Garmin connection status",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "garminConnected": { "type": "boolean" },
+        "garminUserId": { "type": "string" },
+        "lastSync": { "type": "string", "format": "date-time" },
+        "summary30d": {
+          "type": "object",
+          "properties": {
+            "totalDistance": { "type": "number" },
+            "avgPace": { "type": "number" },
+            "paceByEffect": {
+              "type": "object",
+              "properties": {
+                "Threshold": { "type": "number" },
+                "Marathon": { "type": "number" },
+                "Tempo": { "type": "number" },
+                "Recovery": { "type": "number" },
+                "Easy": { "type": "number" }
+              }
+            },
+            "activityCount": { "type": "integer" },
+            "avgHRV": { "type": "number" },
+            "lastUpdated": { "type": "string", "format": "date-time" }
+          }
+        }
+      },
+      "required": ["uid"]
+    },
+    "Activity": {
+      "title": "Running Activity",
+      "description": "Stores individual run data from Garmin",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "activityId": { "type": "string" },
+        "type": { "type": "string", "enum": ["RUNNING", "TRAIL_RUNNING"] },
+        "startTime": { "type": "string", "format": "date-time" },
+        "distance": { "type": "number", "description": "Distance in meters" },
+        "duration": { "type": "number", "description": "Duration in seconds" },
+        "averageHeartRate": { "type": "number" },
+        "maxHeartRate": { "type": "number" },
+        "elevationGain": { "type": "number" },
+        "pace": { "type": "number", "description": "Average pace in min/km" },
+        "vo2Max": { "type": "number" }
+      },
+      "required": ["uid", "activityId", "startTime"]
+    },
+    "HealthMetric": {
+      "title": "Daily Health Metric",
+      "description": "Stores daily metrics like sleep, stress, and HRV",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "restingHeartRate": { "type": "number" },
+        "hrv": { "type": "number" },
+        "sleepScore": { "type": "number" },
+        "stressLevel": { "type": "number" }
+      },
+      "required": ["uid", "date"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile documents"
+    },
+    "users/{userId}/activities/{activityId}": {
+      "schema": "Activity",
+      "description": "User's running activities"
+    },
+    "users/{userId}/health_metrics/{date}": {
+      "schema": "HealthMetric",
+      "description": "User's daily health metrics"
+    }
+  }
+}

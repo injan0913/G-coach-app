@@ -1,0 +1,37 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // User Profile Rules
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && 
+        request.resource.data.keys().hasAll(['uid']) &&
+        request.resource.data.uid == userId;
+    }
+
+    // Activities Rules
+    match /users/{userId}/activities/{activityId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && 
+        request.resource.data.uid == userId;
+      allow delete: if isOwner(userId);
+    }
+
+    // Health Metrics Rules
+    match /users/{userId}/health_metrics/{date} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && 
+        request.resource.data.uid == userId;
+    }
+  }
+}
