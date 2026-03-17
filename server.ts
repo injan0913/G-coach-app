@@ -13,6 +13,9 @@ import { GarminUrls } from "garmin-connect-client/dist/urls.js";
 // @ts-ignore
 import { AuthContext } from "garmin-connect-client/dist/auth-context.js";
 
+// @ts-ignore
+import { AuthenticationService } from "garmin-connect-client/dist/authentication-service.js";
+
 dotenv.config();
 
 // Create an https agent that ignores SSL certificate errors
@@ -120,98 +123,85 @@ async function startServer() {
   app.post("/api/garmin/sync-manual", async (req, res) => {
     const { token, uid } = req.body;
     if (!token) return res.status(400).json({ error: "No token provided" });
-    
-    // Improve header construction
-    let authHeader = '';
-    let cookieHeader = '';
-
-    if (token.includes('=')) {
-      // Likely a full cookie string
-      cookieHeader = token;
-    } else if (token.startsWith('eyJ')) {
-      // Likely a JWT
-      authHeader = `Bearer ${token}`;
-    } else {
-      // Treat as a raw SESSIONID (hash)
-      cookieHeader = `SESSIONID=${token}`;
-    }
-
-    const headers = { 
-      'Authorization': authHeader,
-      'Cookie': cookieHeader,
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'application/json, text/plain, */*',
-      'Referer': 'https://connect.garmin.com/modern/activities'
-    };
 
     try {
-      console.log(`Attempting manual sync for UID: ${uid}`);
-      // 1. Fetch Activities
-      const activitiesRes = await axios.get("https://connect.garmin.com/modern/proxy/activitylist-service/activities/search/activities", {
-        headers,
-        params: { limit: 50 },
-        httpsAgent
+      console.log(`Attempting manual sync for UID: ${uid} using token login (garth style)`);
+      
+      const urls = new GarminUrls();
+      // 1. Initialize HttpClient with the SESSIONID cookie
+      const httpClient = new HttpClient(urls, undefined, `SESSIONID=${token}`);
+      
+      // 2. Visit sign-in page to establish session (as AuthenticationService does)
+      await httpClient.get(urls.SIGN_IN_PAGE(), {
+        headers: {
+          'User-Agent': "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+        },
       });
 
-      // Check if we got HTML instead of JSON (Garmin redirects to login page on session expiry)
-      if (typeof activitiesRes.data === 'string' && activitiesRes.data.includes('<!DOCTYPE html>')) {
-        console.error("Garmin session expired: Received HTML login page instead of JSON data.");
-        return res.status(401).json({ 
-          error: "Garmin session expired.",
-          hint: "Your Garmin session token or cookie has expired. Please log in to connect.garmin.com again and copy a fresh SESSIONID or JWT."
+      // 3. Attempt to get a login ticket using the existing session
+      // This mimics garth's behavior when a token is provided
+      const loginUrl = urls.LOGIN_API();
+      const loginBody = {
+        username: "", // Not needed when session is valid
+        password: "", 
+        rememberMe: false,
+        captchaToken: '',
+      };
+
+      let ticket;
+      try {
+        const loginResponse: any = await httpClient.post(loginUrl, loginBody, {
+          headers: {
+            'Content-Type': 'application/json',
+            'Referer': urls.SIGN_IN_REFERER(),
+            'User-Agent': "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+          },
         });
+        ticket = loginResponse.serviceTicketId;
+      } catch (e: any) {
+        console.error("Failed to get ticket with SESSIONID:", e.message);
+        throw new Error("Session expired or invalid. Please get a fresh SESSIONID from connect.garmin.com");
       }
 
-      console.log(`Fetched ${activitiesRes.data?.length || 0} activities from Garmin.`);
-      if (activitiesRes.data && activitiesRes.data.length > 0) {
-        console.log("Sample Activity ID:", activitiesRes.data[0].activityId);
+      if (!ticket) {
+        throw new Error("Could not obtain service ticket. SESSIONID might be invalid.");
       }
 
-      // 2. Fetch Health Metrics (HRV, RHR, Sleep)
+      // 4. Complete full authentication flow (Ticket -> OAuth1 -> OAuth2)
+      // This is the exact same sequence garth uses
+      const authenticatedClient = await AuthenticationService.completeAuthentication(urls, httpClient.getCookies(), {
+        type: 'ticket',
+        ticket
+      });
+      
+      const client = authenticatedClient;
+
+      // 6. Fetch Data
+      const activities = await client.get(urls.ACTIVITY_SEARCH(0, 50));
+      
       let healthData = { hrv: [], rhr: [], sleep: [] };
       try {
         const today = new Date().toISOString().split('T')[0];
-        const hrvRes = await axios.get(`https://connect.garmin.com/modern/proxy/hrv-service/hrv/${today}`, { 
-          headers,
-          httpsAgent
-        });
-        healthData.hrv = hrvRes.data?.hrvSummaries || [];
-        console.log(`Fetched ${healthData.hrv.length} HRV summaries.`);
-      } catch (e: any) { 
-        console.log("HRV fetch failed:", e.message); 
-      }
+        const hrvRes: any = await client.get(`https://connect.garmin.com/modern/proxy/hrv-service/hrv/${today}`);
+        healthData.hrv = hrvRes?.hrvSummaries || [];
+      } catch (e: any) { console.log("HRV fetch failed:", e.message); }
 
       try {
-        const rhrRes = await axios.get("https://connect.garmin.com/modern/proxy/userstats-service/statistics/restingHeartRate", { 
-          headers,
-          httpsAgent
-        });
-        healthData.rhr = rhrRes.data || [];
-        console.log(`Fetched ${healthData.rhr.length} RHR records.`);
-      } catch (e: any) { 
-        console.log("RHR fetch failed:", e.message); 
-      }
-      
+        const rhrRes: any = await client.get("https://connect.garmin.com/modern/proxy/userstats-service/statistics/restingHeartRate");
+        healthData.rhr = rhrRes || [];
+      } catch (e: any) { console.log("RHR fetch failed:", e.message); }
+
       res.json({ 
         success: true, 
-        activities: activitiesRes.data,
+        activities,
         health: healthData,
-        message: "Real data fetched from Garmin Connect."
+        session: client.getSession()
       });
     } catch (error: any) {
-      const statusCode = error.response?.status || 500;
-      const errorData = error.response?.data;
-      console.error("Manual Sync Error:", {
-        status: statusCode,
-        message: error.message,
-        data: errorData
-      });
-      
-      res.status(statusCode).json({ 
-        error: "Failed to fetch data from Garmin.",
-        message: error.message,
-        details: errorData,
-        hint: "Please ensure your Garmin session token/cookie is valid and not expired. You may need to refresh your login on connect.garmin.com."
+      console.error("Manual Sync Error:", error.message);
+      res.status(500).json({ 
+        error: "Failed to sync using token.",
+        message: error.message
       });
     }
   });
