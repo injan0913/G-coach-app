@@ -31,7 +31,8 @@
             "avgHRV": { "type": "number" },
             "lastUpdated": { "type": "string", "format": "date-time" }
           }
-        }
+        },
+        "coachInsights": { "type": "string", "description": "AI-generated coaching advice" }
       },
       "required": ["uid"]
     },

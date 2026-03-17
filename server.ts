@@ -6,6 +6,12 @@ import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
 import axios from "axios";
 import https from "https";
+// @ts-ignore
+import { HttpClient } from "garmin-connect-client/dist/http-client.js";
+// @ts-ignore
+import { GarminUrls } from "garmin-connect-client/dist/urls.js";
+// @ts-ignore
+import { AuthContext } from "garmin-connect-client/dist/auth-context.js";
 
 dotenv.config();
 
@@ -115,9 +121,24 @@ async function startServer() {
     const { token, uid } = req.body;
     if (!token) return res.status(400).json({ error: "No token provided" });
     
+    // Improve header construction
+    let authHeader = '';
+    let cookieHeader = '';
+
+    if (token.includes('=')) {
+      // Likely a full cookie string
+      cookieHeader = token;
+    } else if (token.startsWith('eyJ')) {
+      // Likely a JWT
+      authHeader = `Bearer ${token}`;
+    } else {
+      // Treat as a raw SESSIONID (hash)
+      cookieHeader = `SESSIONID=${token}`;
+    }
+
     const headers = { 
-      'Authorization': token.startsWith('Bearer ') ? token : `Bearer ${token}`,
-      'Cookie': token.includes('=') ? token : '',
+      'Authorization': authHeader,
+      'Cookie': cookieHeader,
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Accept': 'application/json, text/plain, */*',
       'Referer': 'https://connect.garmin.com/modern/activities'
@@ -131,6 +152,15 @@ async function startServer() {
         params: { limit: 50 },
         httpsAgent
       });
+
+      // Check if we got HTML instead of JSON (Garmin redirects to login page on session expiry)
+      if (typeof activitiesRes.data === 'string' && activitiesRes.data.includes('<!DOCTYPE html>')) {
+        console.error("Garmin session expired: Received HTML login page instead of JSON data.");
+        return res.status(401).json({ 
+          error: "Garmin session expired.",
+          hint: "Your Garmin session token or cookie has expired. Please log in to connect.garmin.com again and copy a fresh SESSIONID or JWT."
+        });
+      }
 
       console.log(`Fetched ${activitiesRes.data?.length || 0} activities from Garmin.`);
       if (activitiesRes.data && activitiesRes.data.length > 0) {
@@ -182,6 +212,56 @@ async function startServer() {
         message: error.message,
         details: errorData,
         hint: "Please ensure your Garmin session token/cookie is valid and not expired. You may need to refresh your login on connect.garmin.com."
+      });
+    }
+  });
+
+  app.post("/api/garmin/sync-garth", async (req, res) => {
+    const { session, uid } = req.body;
+    if (!session) return res.status(400).json({ error: "No session provided" });
+
+    try {
+      console.log(`Attempting Garth sync for UID: ${uid}`);
+      
+      const urls = new GarminUrls();
+      const authContext = new AuthContext(
+        false, 
+        session.cookies, 
+        undefined, 
+        undefined, 
+        session.oauth1Token, 
+        session.oauth2Token
+      );
+      const client = new HttpClient(urls, authContext);
+
+      // 1. Fetch Activities
+      const activities = await client.get(urls.ACTIVITY_SEARCH(0, 50));
+      console.log(`Garth: Fetched ${Array.isArray(activities) ? activities.length : 0} activities.`);
+
+      // 2. Fetch Health Metrics
+      let healthData = { hrv: [], rhr: [], sleep: [] };
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const hrvRes: any = await client.get(`https://connect.garmin.com/modern/proxy/hrv-service/hrv/${today}`);
+        healthData.hrv = hrvRes?.hrvSummaries || [];
+      } catch (e: any) { console.log("Garth HRV fetch failed:", e.message); }
+
+      try {
+        const rhrRes: any = await client.get("https://connect.garmin.com/modern/proxy/userstats-service/statistics/restingHeartRate");
+        healthData.rhr = rhrRes || [];
+      } catch (e: any) { console.log("Garth RHR fetch failed:", e.message); }
+
+      res.json({ 
+        success: true, 
+        activities,
+        health: healthData,
+        message: "Real data fetched using Garth session."
+      });
+    } catch (error: any) {
+      console.error("Garth Sync Error:", error.message);
+      res.status(500).json({ 
+        error: "Failed to fetch data using Garth session.",
+        message: error.message
       });
     }
   });

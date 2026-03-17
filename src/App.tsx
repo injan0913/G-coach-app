@@ -255,10 +255,26 @@ export default function App() {
     setChatHistory(prev => [...prev, { role: "model", text: "Connecting to Garmin using your personal token..." }]);
     
     try {
-      const res = await fetch("/api/garmin/sync-manual", {
+      let isGarth = false;
+      let garthSession = null;
+      
+      try {
+        const parsed = JSON.parse(garminToken);
+        if (parsed.cookies && parsed.oauth1Token && parsed.oauth2Token) {
+          isGarth = true;
+          garthSession = parsed;
+        }
+      } catch (e) {
+        // Not a JSON/Garth session, treat as raw token
+      }
+
+      const endpoint = isGarth ? "/api/garmin/sync-garth" : "/api/garmin/sync-manual";
+      const payload = isGarth ? { session: garthSession, uid: user.uid } : { token: garminToken, uid: user.uid };
+
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: garminToken, uid: user.uid })
+        body: JSON.stringify(payload)
       });
       
       const data = await res.json();
@@ -549,6 +565,18 @@ export default function App() {
                       ? "Your Garmin account is bound. You can update your token below if it has expired." 
                       : "Enter your personal Garmin access token (JWT or Session) to bind your account."}
                   </p>
+                  
+                  <div className="bg-black/40 p-3 rounded-xl border border-white/5 space-y-2">
+                    <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider">How to get your Garth session:</p>
+                    <div className="space-y-1">
+                      <ol className="text-[9px] text-zinc-500 list-decimal list-inside space-y-1">
+                        <li>Use a tool like <code className="text-emerald-500">garth</code> to export your session.</li>
+                        <li>Paste the full JSON string (including cookies & OAuth tokens) below.</li>
+                        <li>This method provides the most stable connection and complete health data.</li>
+                      </ol>
+                    </div>
+                  </div>
+
                   <div className="flex flex-col gap-3">
                     <div className="relative">
                       <input 
@@ -621,7 +649,7 @@ export default function App() {
                 />
                 <StatCard 
                   label="VO2 Max" 
-                  value={stats.latestVO2} 
+                  value={String(stats.latestVO2)} 
                   trend="Garmin" 
                   icon={<Zap size={18} className="text-amber-500" />} 
                 />
