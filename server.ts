@@ -132,6 +132,11 @@ async function startServer() {
         httpsAgent
       });
 
+      console.log(`Fetched ${activitiesRes.data?.length || 0} activities from Garmin.`);
+      if (activitiesRes.data && activitiesRes.data.length > 0) {
+        console.log("Sample Activity ID:", activitiesRes.data[0].activityId);
+      }
+
       // 2. Fetch Health Metrics (HRV, RHR, Sleep)
       let healthData = { hrv: [], rhr: [], sleep: [] };
       try {
@@ -141,6 +146,7 @@ async function startServer() {
           httpsAgent
         });
         healthData.hrv = hrvRes.data?.hrvSummaries || [];
+        console.log(`Fetched ${healthData.hrv.length} HRV summaries.`);
       } catch (e: any) { 
         console.log("HRV fetch failed:", e.message); 
       }
@@ -151,6 +157,7 @@ async function startServer() {
           httpsAgent
         });
         healthData.rhr = rhrRes.data || [];
+        console.log(`Fetched ${healthData.rhr.length} RHR records.`);
       } catch (e: any) { 
         console.log("RHR fetch failed:", e.message); 
       }

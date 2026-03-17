@@ -112,6 +112,10 @@ export default function App() {
   }, [weeklyVolumeData, healthMetrics, profile, activities]);
 
   useEffect(() => {
+    console.log(`Activities state updated: ${activities.length} items`);
+  }, [activities]);
+
+  useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
       if (u) {
@@ -258,16 +262,21 @@ export default function App() {
       });
       
       const data = await res.json();
+      console.log("Garmin API Response Data:", data);
+
       if (!res.ok) {
         throw new Error(data.error || "Garmin API rejected the token. Please check if your session is still active.");
       }
       
       const garminActivities = data.activities;
       if (!garminActivities || garminActivities.length === 0) {
+        console.warn("No activities returned from Garmin.");
         setChatHistory(prev => [...prev, { role: "model", text: "The token is valid, but Garmin returned 0 activities for the last 30 days. Please check your Garmin Connect account." }]);
         setIsTyping(false);
         return;
       }
+
+      console.log(`Processing ${garminActivities.length} activities...`);
       const batch = writeBatch(db);
       const syncedActivities: Activity[] = [];
 
@@ -307,6 +316,7 @@ export default function App() {
       
       try {
         await batch.commit();
+        console.log("Activities batch committed successfully.");
       } catch (err) {
         handleFirestoreError(err, "write", `users/${user.uid}/activities`);
       }
